@@ -1,3 +1,4 @@
+
 package com.example.taptopayandroid
 
 import android.Manifest
@@ -8,6 +9,7 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.widget.Button
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
@@ -27,6 +29,9 @@ import retrofit2.Response
 var SKIP_TIPPING: Boolean = true
 
 class MainActivity : AppCompatActivity(), NavigationListener {
+    companion object {
+        private const val TAG = "MainActivity"
+    }
     // Register the permissions callback to handles the response to the system permissions dialog.
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -36,6 +41,7 @@ class MainActivity : AppCompatActivity(), NavigationListener {
     @RequiresApi(Build.VERSION_CODES.S)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Log.d(TAG, "onCreate() called")
         setContentView(R.layout.activity_main)
 
         navigateTo(ConnectReaderFragment.TAG, ConnectReaderFragment(), false)
@@ -48,13 +54,17 @@ class MainActivity : AppCompatActivity(), NavigationListener {
                 Manifest.permission.BLUETOOTH_CONNECT
             ) == PackageManager.PERMISSION_GRANTED
         ) {
+            Log.d(TAG, "Bluetooth permission granted")
             BluetoothAdapter.getDefaultAdapter()?.let { adapter ->
                 if (!adapter.isEnabled) {
+                    Log.d(TAG, "Enabling Bluetooth adapter")
                     adapter.enable()
+                } else {
+                    Log.d(TAG, "Bluetooth adapter already enabled")
                 }
             }
         } else {
-            Log.w(MainActivity::class.java.simpleName, "Failed to acquire Bluetooth permission")
+            Log.w(TAG, "Failed to acquire Bluetooth permission")
         }
     }
 
@@ -110,13 +120,16 @@ class MainActivity : AppCompatActivity(), NavigationListener {
     }
 
     private fun initialize() {
+        Log.d(TAG, "Initializing Terminal...")
         // Initialize the Terminal as soon as possible
         try {
             Terminal.initTerminal(
                 applicationContext, LogLevel.VERBOSE, TokenProvider(),
                 TerminalEventListener()
             )
+            Log.d(TAG, "Terminal initialized successfully")
         } catch (e: TerminalException) {
+            Log.e(TAG, "Failed to initialize Terminal", e)
             throw RuntimeException(
                 "Location services are required in order to initialize " +
                         "the Terminal.",
@@ -131,10 +144,12 @@ class MainActivity : AppCompatActivity(), NavigationListener {
 
     private val locationCallback = object : LocationListCallback {
         override fun onFailure(e: TerminalException) {
+            Log.e(TAG, "Failed to load locations", e)
             e.printStackTrace()
         }
 
         override fun onSuccess(locations: List<Location>, hasMore: Boolean) {
+            Log.d(TAG, "Loaded ${locations.size} locations, hasMore: $hasMore")
             mutableListState.value = mutableListState.value.let {
                 it.copy(
                     locations = it.locations + locations,
@@ -151,7 +166,8 @@ class MainActivity : AppCompatActivity(), NavigationListener {
         skipTipping: Boolean,
         extendedAuth: Boolean,
         incrementalAuth: Boolean
-    ){
+    ) {
+        Log.d(TAG, "Starting payment collection - amount: $amount, currency: $currency, skipTipping: $skipTipping")
         SKIP_TIPPING = skipTipping
 
         ApiClient.createPaymentIntent(
@@ -164,13 +180,17 @@ class MainActivity : AppCompatActivity(), NavigationListener {
                     call: Call<PaymentIntentCreationResponse>,
                     response: Response<PaymentIntentCreationResponse>
                 ) {
+                    Log.d(TAG, "Payment intent creation response - isSuccessful: ${response.isSuccessful}, code: ${response.code()}")
                     if (response.isSuccessful && response.body() != null) {
+                        val secret = response.body()!!.secret
+                        Log.d(TAG, "Retrieving payment intent with secret: ${secret.take(20)}...")
+                        // Use client_secret from the response
                         Terminal.getInstance().retrievePaymentIntent(
-                            response.body()?.secret!!,
+                            secret,
                             createPaymentIntentCallback
                         )
                     } else {
-                        println("Request not successful: ${response.body()}")
+                        Log.e(TAG, "Payment intent creation failed - Response: ${response.errorBody()?.string()}")
                     }
                 }
 
@@ -178,27 +198,32 @@ class MainActivity : AppCompatActivity(), NavigationListener {
                     call: Call<PaymentIntentCreationResponse>,
                     t: Throwable
                 ) {
+                    Log.e(TAG, "Payment intent creation failed", t)
                     t.printStackTrace()
                 }
             }
         )
     }
 
+
     private val createPaymentIntentCallback by lazy {
         object : PaymentIntentCallback {
             override fun onSuccess(paymentIntent: PaymentIntent) {
+                Log.d(TAG, "Payment intent retrieved successfully: ${paymentIntent.id}")
                 val skipTipping = SKIP_TIPPING
 
                 val collectConfig = CollectConfiguration.Builder()
                     .skipTipping(skipTipping)
                     .build()
 
+                Log.d(TAG, "Starting payment method collection with skipTipping: $skipTipping")
                 Terminal.getInstance().collectPaymentMethod(
                     paymentIntent, collectPaymentMethodCallback, collectConfig
                 )
             }
 
             override fun onFailure(e: TerminalException) {
+                Log.e(TAG, "Failed to retrieve payment intent", e)
                 e.printStackTrace()
             }
         }
@@ -207,10 +232,13 @@ class MainActivity : AppCompatActivity(), NavigationListener {
     private val collectPaymentMethodCallback by lazy {
         object : PaymentIntentCallback {
             override fun onSuccess(paymentIntent: PaymentIntent) {
+                Log.d(TAG, "Payment method collected successfully: ${paymentIntent.id}")
+                Log.d(TAG, "Processing payment...")
                 Terminal.getInstance().processPayment(paymentIntent, processPaymentCallback)
             }
 
             override fun onFailure(e: TerminalException) {
+                Log.e(TAG, "Failed to collect payment method", e)
                 e.printStackTrace()
             }
         }
@@ -219,19 +247,24 @@ class MainActivity : AppCompatActivity(), NavigationListener {
     private val processPaymentCallback by lazy {
         object : PaymentIntentCallback {
             override fun onSuccess(paymentIntent: PaymentIntent) {
+                Log.d(TAG, "Payment processed successfully: ${paymentIntent.id}")
+                Log.d(TAG, "Capturing payment intent...")
                 ApiClient.capturePaymentIntent(paymentIntent.id)
 
                 //TODO : Return to previous Screen
+                Log.d(TAG, "Navigating to payment details screen")
                 navigateTo(PaymentDetails.TAG, PaymentDetails(), true)
             }
 
             override fun onFailure(e: TerminalException) {
+                Log.e(TAG, "Failed to process payment", e)
                 e.printStackTrace()
             }
         }
     }
 
     private fun loadLocations() {
+        Log.d(TAG, "Loading locations...")
         Terminal.getInstance().listLocations(
             ListLocationsParameters.Builder().apply {
                 limit = 100
@@ -241,54 +274,106 @@ class MainActivity : AppCompatActivity(), NavigationListener {
     }
 
     private fun connectReader(){
-        val config = DiscoveryConfiguration(
-            timeout = 0,
-            discoveryMethod = DiscoveryMethod.LOCAL_MOBILE,
-            isSimulated = false,
-            location = mutableListState.value.locations[0].id
-        )
+        Log.d(TAG, "Starting connectReader()")
+        
+        try {
+            // Check if locations are available
+            if (mutableListState.value.locations.isEmpty()) {
+                Log.e(TAG, "No locations available for reader connection")
+                runOnUiThread {
+                    // Reset button text on error
+                    val fragment = supportFragmentManager.findFragmentByTag(ConnectReaderFragment.TAG) as? ConnectReaderFragment
+                    fragment?.view?.findViewById<Button>(R.id.connect_reader_button)?.text = "Connect reader"
+                }
+                return
+            }
 
-        Terminal.getInstance().discoverReaders(config, discoveryListener = object :
-            DiscoveryListener {
-            override fun onUpdateDiscoveredReaders(readers: List<Reader>) {
-                readers.filter { it.networkStatus != Reader.NetworkStatus.OFFLINE }
-                var reader = readers[0]
+            val locationId = mutableListState.value.locations[0].id
+            Log.d(TAG, "Using location ID: $locationId")
 
-                val config = ConnectionConfiguration.LocalMobileConnectionConfiguration("${mutableListState.value.locations[0].id}")
+            val config = DiscoveryConfiguration(
+                timeout = 0,
+                discoveryMethod = DiscoveryMethod.LOCAL_MOBILE,
+                isSimulated = false,
+                location = locationId ?: ""
+            )
 
-                Terminal.getInstance().connectLocalMobileReader(
-                    reader,
-                    config,
-                    object: ReaderCallback {
-                        override fun onFailure(e: TerminalException) {
-                            e.printStackTrace()
+            Log.d(TAG, "Starting reader discovery...")
+            Terminal.getInstance().discoverReaders(config, discoveryListener = object :
+                DiscoveryListener {
+                override fun onUpdateDiscoveredReaders(readers: List<Reader>) {
+                    Log.d(TAG, "Discovered ${readers.size} readers")
+                    
+                    val onlineReaders = readers.filter { it.networkStatus != Reader.NetworkStatus.OFFLINE }
+                    Log.d(TAG, "Online readers: ${onlineReaders.size}")
+                    
+                    if (onlineReaders.isEmpty()) {
+                        Log.e(TAG, "No online readers found")
+                        runOnUiThread {
+                            // Reset button text on error
+                            val fragment = supportFragmentManager.findFragmentByTag(ConnectReaderFragment.TAG) as? ConnectReaderFragment
+                            fragment?.view?.findViewById<Button>(R.id.connect_reader_button)?.text = "Connect reader"
                         }
+                        return
+                    }
 
-                        override fun onSuccess(reader: Reader) {
-                            // Update the UI with the location name and terminal ID
-                            runOnUiThread {
-                                val manager: FragmentManager = supportFragmentManager
-                                val fragment: Fragment? = manager.findFragmentByTag(ConnectReaderFragment.TAG)
+                    val reader = onlineReaders[0]
+                    Log.d(TAG, "Connecting to reader: ${reader.id ?: "unknown"}")
 
-                                if(reader.id !== null && mutableListState.value.locations[0].displayName !== null){
-                                    (fragment as ConnectReaderFragment).updateReaderId(
-                                        mutableListState.value.locations[0].displayName!!, reader.id!!
-                                    )
+                    val connectionConfig = ConnectionConfiguration.LocalMobileConnectionConfiguration(locationId ?: "")
+
+                    Terminal.getInstance().connectLocalMobileReader(
+                        reader,
+                        connectionConfig,
+                        object: ReaderCallback {
+                            override fun onFailure(e: TerminalException) {
+                                Log.e(TAG, "Failed to connect to reader", e)
+                                runOnUiThread {
+                                    // Reset button text on error
+                                    val fragment = supportFragmentManager.findFragmentByTag(ConnectReaderFragment.TAG) as? ConnectReaderFragment
+                                    fragment?.view?.findViewById<Button>(R.id.connect_reader_button)?.text = "Connect reader"
+                                }
+                            }
+
+                            override fun onSuccess(reader: Reader) {
+                                Log.d(TAG, "Successfully connected to reader: ${reader.id}")
+                                // Update the UI with the location name and terminal ID
+                                runOnUiThread {
+                                    val manager: FragmentManager = supportFragmentManager
+                                    val fragment: Fragment? = manager.findFragmentByTag(ConnectReaderFragment.TAG)
+
+                                    if(reader.id != null && mutableListState.value.locations[0].displayName != null){
+                                        (fragment as? ConnectReaderFragment)?.updateReaderId(
+                                            mutableListState.value.locations[0].displayName!!, reader.id!!
+                                        )
+                                    }
                                 }
                             }
                         }
-                    }
-                )
-            }
-        }, object : Callback {
-            override fun onSuccess() {
-                println("Finished discovering readers")
-            }
+                    )
+                }
+            }, object : Callback {
+                override fun onSuccess() {
+                    Log.d(TAG, "Finished discovering readers")
+                }
 
-            override fun onFailure(e: TerminalException) {
-                e.printStackTrace()
+                override fun onFailure(e: TerminalException) {
+                    Log.e(TAG, "Reader discovery failed", e)
+                    runOnUiThread {
+                        // Reset button text on error
+                        val fragment = supportFragmentManager.findFragmentByTag(ConnectReaderFragment.TAG) as? ConnectReaderFragment
+                        fragment?.view?.findViewById<Button>(R.id.connect_reader_button)?.text = "Connect reader"
+                    }
+                }
+            })
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception in connectReader()", e)
+            runOnUiThread {
+                // Reset button text on error
+                val fragment = supportFragmentManager.findFragmentByTag(ConnectReaderFragment.TAG) as? ConnectReaderFragment
+                fragment?.view?.findViewById<Button>(R.id.connect_reader_button)?.text = "Connect reader"
             }
-        })
+        }
     }
 
     // Navigate to Fragment

@@ -2,6 +2,7 @@ package com.example.taptopayandroid.fragments
 
 import android.annotation.SuppressLint
 import android.os.Bundle
+import android.util.Log
 import androidx.fragment.app.Fragment
 import android.view.LayoutInflater
 import android.view.View
@@ -18,6 +19,7 @@ var currentReaderDetails: String? = null
 class ConnectReaderFragment : Fragment() {
     companion object {
         const val TAG = "com.example.taptopayandroid.fragments.ConnectReaderFragment"
+        private const val LOG_TAG = "ConnectReaderFragment"
     }
 
 //    @SuppressLint("MissingInflatedId")
@@ -41,6 +43,7 @@ class ConnectReaderFragment : Fragment() {
         }
 
         btnConnectReader!!.setOnClickListener {
+            Log.d(LOG_TAG, "Connect reader button clicked")
             btnConnectReader!!.text = "Connecting..."
             (activity as? NavigationListener)?.onConnectReader()
         }
@@ -53,12 +56,13 @@ class ConnectReaderFragment : Fragment() {
     }
 
     fun updateReaderId(location: String, reader_id: String){
+        Log.d(LOG_TAG, "Updating reader ID: $location : $reader_id")
         val readerId = view?.findViewById(R.id.reader_id) as TextView
         readerId.text = "$location : $reader_id"
 
         btnConnectReader?.visibility = View.INVISIBLE
         editPaymentDetailsButton?.visibility = View.VISIBLE
 
-        currentReaderDetails = readerId.text as String
+        currentReaderDetails = readerId.text.toString()
     }
 }
